@@ -1,0 +1,59 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://dips:dips@postgres:5432/dips
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    develop:
+      watch:
+        - action: sync
+          path: ./src
+          target: /app/src
+        - action: rebuild
+          path: package.json
+        - action: rebuild
+          path: pnpm-lock.yaml
+        - action: rebuild
+          path: prisma/schema.prisma
+
+  postgres:
+    image: postgres:18-alpine
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: dips
+      POSTGRES_PASSWORD: dips
+      POSTGRES_DB: dips
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dips -d dips']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
