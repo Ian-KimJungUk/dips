@@ -7,3 +7,5 @@ deploy/nginx/active.inc
 *.log
 src/generated/
 *.tsbuildinfo
+k6/results/*
+!k6/results/.gitkeep
