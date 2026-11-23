@@ -1,0 +1,81 @@
+name: CD
+
+on:
+  # main CI가 성공(이미지 push 완료)하면 실행
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # 수동 배포/롤백: 배포할 이미지 태그를 직접 지정
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '배포할 이미지 태그 (예: sha-1a2b3c4)'
+        required: true
+
+# 배포는 한 번에 하나씩. 진행 중인 배포는 취소하지 않고 다음 배포가 대기
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # PR의 CI는 제외하고, main push로 돈 CI가 성공했을 때만
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    # Settings > Environments > production 에서 승인자(Required reviewers) 지정
+    environment: production
+    permissions:
+      id-token: write # AWS OIDC
+      contents: read
+    env:
+      INPUT_TAG: ${{ inputs.tag }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/dips' }}
+    steps:
+      - name: 태그 확인
+        run: |
+          # 자동 배포는 CI의 metadata-action(type=sha)과 같은 형식: sha-<커밋 7자리>
+          TAG=${INPUT_TAG:-sha-${HEAD_SHA:0:7}}
+          # 서버 셸 명령에 들어가므로 형식을 엄격히 검사
+          if [[ ! "$TAG" =~ ^sha-[0-9a-f]{7}$ ]]; then
+            echo "잘못된 태그: $TAG (형식: sha-1a2b3c4)" >&2
+            exit 1
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "배포 태그: $TAG"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: EC2에서 deploy.sh 실행 (SSM)
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy $TAG" \
+            --parameters "{\"commands\":[\"cd $DEPLOY_DIR && ./deploy.sh $TAG\"]}" \
+            --query Command.CommandId --output text)
+          echo "SSM command: $COMMAND_ID"
+
+          # aws ssm wait는 최대 100초라 배포(헬스체크 최대 60초 포함)에 부족해 직접 대기
+          for _ in $(seq 1 120); do
+            sleep 5
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Pending|InProgress|Delayed) continue ;; esac
+            break
+          done
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text
+
+          echo "결과: $STATUS"
+          [ "$STATUS" = Success ]
