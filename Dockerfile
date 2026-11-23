@@ -17,6 +17,13 @@ FROM base AS prod-deps
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts --no-optional
 
+# 마이그레이션 전용 이미지: build 단계의 prisma CLI·prisma/·prisma.config.ts를 그대로 사용
+# 배포 시 앱보다 먼저 DATABASE_URL을 넣어 일회성으로 실행 (docker build --target migrate)
+# runtime보다 앞에 둬서 기본 빌드 타깃은 runtime으로 유지
+FROM build AS migrate
+USER node
+CMD ["pnpm", "db:deploy"]
+
 FROM node:26-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
