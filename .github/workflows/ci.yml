@@ -85,5 +85,23 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # 두 이미지가 같은 캐시 scope를 쓰면 서로 덮어쓰므로 분리
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      # 마이그레이션 이미지: 앱과 같은 커밋 태그로 올려 배포 시 버전을 맞춤
+      - id: meta-migrate
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-migrate
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrate
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta-migrate.outputs.tags }}
+          labels: ${{ steps.meta-migrate.outputs.labels }}
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,mode=max,scope=migrate
