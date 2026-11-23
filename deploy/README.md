@@ -33,7 +33,59 @@ EC2 한 대에서 nginx + blue/green으로 무중단 배포한다. Postgres는 R
 3. `cp app.env.example app.env` 후 RDS 접속 정보 입력
 4. 보안 그룹: 80 인바운드 허용, RDS 보안 그룹에서 EC2 접근 허용
 
+`deploy/` 파일(compose.yml, nginx, deploy.sh)이 바뀌면 서버에도 다시 복사해야 한다. CD는 서버에 있는 `deploy.sh`를 실행할 뿐 파일을 갱신하지 않는다.
+
+## CD (GitHub Actions → SSM → deploy.sh)
+
+`.github/workflows/cd.yml`: main CI 성공 → `production` 환경 승인 → SSM으로 EC2에서 `deploy.sh sha-<커밋>` 실행.
+
+### AWS 설정
+
+1. IAM > 자격 증명 공급자: OpenID Connect 추가
+   - URL `https://token.actions.githubusercontent.com`, 대상 `sts.amazonaws.com`
+2. IAM 역할 생성 (GitHub Actions가 assume)
+   - 신뢰 정책:
+     ```json
+     {
+       "Version": "2012-10-17",
+       "Statement": [{
+         "Effect": "Allow",
+         "Principal": { "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com" },
+         "Action": "sts:AssumeRoleWithWebIdentity",
+         "Condition": { "StringEquals": {
+           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+           "token.actions.githubusercontent.com:sub": "repo:Ian-KimJungUk/dips:environment:production"
+         } }
+       }]
+     }
+     ```
+   - 권한 정책:
+     ```json
+     {
+       "Version": "2012-10-17",
+       "Statement": [
+         { "Effect": "Allow", "Action": "ssm:SendCommand", "Resource": [
+           "arn:aws:ec2:<REGION>:<ACCOUNT_ID>:instance/<INSTANCE_ID>",
+           "arn:aws:ssm:<REGION>::document/AWS-RunShellScript"
+         ] },
+         { "Effect": "Allow", "Action": "ssm:GetCommandInvocation", "Resource": "*" }
+       ]
+     }
+     ```
+3. EC2 인스턴스 프로파일에 `AmazonSSMManagedInstanceCore` 연결 (Amazon Linux 2023은 SSM agent 기본 설치)
+
+### GitHub 설정
+
+1. Settings > Environments > `production` 생성, Required reviewers에 승인자 지정
+2. Settings > Secrets and variables > Actions > Variables
+   - `AWS_ROLE_ARN`: 위 IAM 역할 ARN
+   - `AWS_REGION`: 예) `ap-northeast-2`
+   - `EC2_INSTANCE_ID`: 예) `i-0123456789abcdef0`
+   - `DEPLOY_DIR` (선택, 기본 `/opt/dips`)
+
 ## 수동 배포 / 롤백
+
+GitHub Actions > CD > Run workflow 에서 태그(`sha-1a2b3c4`) 입력. 또는 서버에서 직접:
 
 ```sh
 ./deploy.sh sha-1a2b3c4      # 배포
