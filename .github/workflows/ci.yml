@@ -23,6 +23,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm format:check
 
   test:
     needs: lint
@@ -41,23 +42,9 @@ jobs:
       # Testcontainers가 러너의 Docker로 PostgreSQL/Redis를 띄움
       - run: pnpm test:e2e
 
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.29.3
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 26
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-
+  # 이미지 빌드 안에서 pnpm build(nest build)가 실행되므로 별도 build job은 두지 않음
   docker:
-    needs: build
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
