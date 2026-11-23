@@ -13,11 +13,11 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.29.3
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: pnpm
@@ -29,11 +29,11 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.29.3
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: pnpm
@@ -50,23 +50,23 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         if: github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
       # PR에서는 이미지 빌드만 확인하고, main push일 때만 GHCR에 올림
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: ${{ github.event_name == 'push' }}
@@ -74,16 +74,16 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # 두 이미지가 같은 캐시 scope를 쓰면 서로 덮어쓰므로 분리
           cache-from: type=gha,scope=app
-          cache-to: type=gha,mode=max,scope=app
+          cache-to: type=gha,mode=max,scope=app,ignore-error=true
       # 마이그레이션 이미지: 앱과 같은 커밋 태그로 올려 배포 시 버전을 맞춤
       - id: meta-migrate
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}-migrate
           tags: |
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           target: migrate
@@ -91,4 +91,4 @@ jobs:
           tags: ${{ steps.meta-migrate.outputs.tags }}
           labels: ${{ steps.meta-migrate.outputs.labels }}
           cache-from: type=gha,scope=migrate
-          cache-to: type=gha,mode=max,scope=migrate
+          cache-to: type=gha,mode=max,scope=migrate,ignore-error=true
