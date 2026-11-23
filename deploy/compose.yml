@@ -1,0 +1,40 @@
+# EC2 운영용 구성. 컨테이너 기동/교체는 deploy.sh가 담당하므로 직접 up 하지 말 것
+# Postgres는 RDS를 사용 (app.env의 DATABASE_URL)
+name: dips-prod
+
+x-app: &app
+  env_file: app.env
+  restart: unless-stopped
+
+services:
+  nginx:
+    image: nginx:1.28-alpine
+    ports:
+      - '${HTTP_PORT:-80}:80'
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+    restart: unless-stopped
+
+  # blue/green 중 하나가 트래픽을 받고, 배포 시 반대쪽에 새 버전을 띄운 뒤 전환
+  app-blue:
+    <<: *app
+    image: ${APP_IMAGE:-ghcr.io/ian-kimjunguk/dips}:${BLUE_TAG:-none}
+
+  app-green:
+    <<: *app
+    image: ${APP_IMAGE:-ghcr.io/ian-kimjunguk/dips}:${GREEN_TAG:-none}
+
+  # deploy.sh가 `docker compose run`으로 일회성 실행 (up 대상 아님)
+  migrate:
+    image: ${MIGRATE_IMAGE:-ghcr.io/ian-kimjunguk/dips-migrate}:${DEPLOY_TAG:-none}
+    env_file: app.env
+    profiles: [migrate]
+
+  redis:
+    image: redis:8-alpine
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+volumes:
+  redis-data:
