@@ -26,7 +26,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "k6:stock": "docker compose run --rm k6 run /scripts/stock-decrease.js"
   },
   "dependencies": {
     "@keyv/redis": "^5.1.6",

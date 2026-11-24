@@ -7,11 +7,13 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { HealthController } from './health/health.controller.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { StockModule } from './stock/stock.module.js';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    StockModule,
     CacheModule.registerAsync({
       isGlobal: true,
       inject: [ConfigService],

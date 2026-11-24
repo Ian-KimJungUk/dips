@@ -8,3 +8,8 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model Stock {
+  id       Int @id @default(autoincrement())
+  quantity Int
+}
