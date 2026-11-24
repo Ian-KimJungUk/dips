@@ -15,6 +15,8 @@ export class PrismaService
   constructor(config: ConfigService) {
     const pool = new Pool({
       connectionString: config.getOrThrow<string>('DATABASE_URL'),
+      // 동시성 전략 비교 결과를 좌우하므로 환경변수로 조정한다. 실제 적용값은 db_pool_max_connections로 확인
+      max: Number(config.get<string>('DATABASE_POOL_MAX') ?? 10),
     });
     super({ adapter: new PrismaPg(pool, { disposeExternalPool: true }) });
     this.pool = pool;

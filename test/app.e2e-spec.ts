@@ -30,6 +30,15 @@ describe('AppController (e2e)', () => {
       .expect({ db: 'up', redis: 'up' });
   });
 
+  // 메트릭 이름만 보면 미들웨어가 빠져도 통과하므로, 요청 하나가 실제로 집계되는지까지 확인한다
+  it('/metrics (GET)', async () => {
+    await request(app.getHttpServer()).get('/health').expect(200);
+    const res = await request(app.getHttpServer()).get('/metrics').expect(200);
+    expect(res.text).toContain(
+      'http_request_duration_seconds_count{method="GET",route="/health",status_code="200"} 1',
+    );
+  });
+
   afterEach(async () => {
     await app.close();
   });

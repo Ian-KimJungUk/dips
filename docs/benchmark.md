@@ -47,12 +47,16 @@ pnpm k6:stock
 | 앱 | NestJS 12, Node 26.13.1, `pnpm start:dev` (watch 모드) |
 | DB | PostgreSQL 18.4 (alpine), `max_connections` 100 |
 | ORM / 드라이버 | Prisma 7.10.1 + `@prisma/adapter-pg` (pg 8.23.1) |
-| DB 커넥션 풀 | **10** (pg-pool 기본값 `max: 10`, 별도 설정 없음) |
+| DB 커넥션 풀 | **10** (`DATABASE_POOL_MAX`, 기본값 10). 이 문서의 결과는 모두 10에서 측정 |
 | k6 | grafana/k6 1.3.0 (같은 Docker 네트워크에서 `http://app:3000`으로 호출) |
 
 **주의**
 - 부하 발생기(k6)와 앱, DB가 같은 VM에서 CPU를 나눠 쓴다. 절대 수치보다는 전략 간 상대 비교용으로 본다.
 - 앱이 dev 모드(`start:dev`)로 실행된다. 프로덕션 빌드보다 느릴 수 있다.
+- 커넥션 풀 크기는 대기 시간과 락 경합을 직접 바꾸므로 전략 비교 결과를 좌우한다. 전략끼리는 같은 값으로 비교하고, 값을 바꾼 결과에는 풀 크기를 함께 적는다.
+  - 변경: `DATABASE_POOL_MAX=20 pnpm dev`
+  - 확인: `curl -s localhost:3000/metrics | grep db_pool_max_connections`. pg-pool은 0이나 숫자가 아닌 값을 에러 없이 10으로 바꾸므로 측정 전에 실제 적용값을 확인한다.
+  - 앱 인스턴스 수 × 풀 크기가 Postgres `max_connections`(100)를 넘으면 커넥션 획득이 실패한다.
 
 ## 결과: naive (락 없음)
 
