@@ -3,11 +3,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+    # PID 1인 pnpm이 종료된 자식 프로세스를 회수하지 않아 좀비가 남으면 컨테이너가 중지·삭제되지 않는다
+    init: true
     ports:
       - '3000:3000'
     environment:
       PORT: 3000
       DATABASE_URL: postgres://dips:dips@postgres:5432/dips
+      # 예: DATABASE_POOL_MAX=20 pnpm dev
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
@@ -69,6 +73,32 @@ services:
     depends_on:
       app:
         condition: service_healthy
+
+  # 부하 테스트 중 병목 관찰용. pnpm monitoring으로 띄운다
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ['monitoring']
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    profiles: ['monitoring']
+    ports:
+      - '3001:3000'
+    environment:
+      # 로컬 전용: 로그인 없이 대시보드를 바로 연다
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/app.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
 
 volumes:
   postgres-data:
