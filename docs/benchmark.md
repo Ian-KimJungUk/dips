@@ -11,6 +11,29 @@
 - 판정: `sold > 100`이면 오버셀링 (threshold `sold: count<=100`)
 - 결과 JSON: `k6/results/<strategy>-<timestamp>.json`
 
+## 모니터링
+
+부하 테스트 중 병목을 보려면 Prometheus + Grafana를 함께 띄운다.
+
+```bash
+pnpm dev          # app, postgres, redis
+pnpm monitoring   # prometheus(:9090), grafana(:3001)
+pnpm k6:stock
+```
+
+- Grafana: http://localhost:3001 (로그인 없음, 홈이 `dips app` 대시보드)
+- 앱 메트릭: http://localhost:3000/metrics (Prometheus가 1초마다 수집)
+
+| 패널 | 메트릭 | 볼 것 |
+|---|---|---|
+| 요청 수 | `http_request_duration_seconds_count` | 라우트·상태코드별 req/s |
+| 응답시간 | `http_request_duration_seconds_bucket` | p50/p95/p99 |
+| 에러율 | 위 count 중 `status_code=~"5.."` 비율 | 409(재고 부족)는 정상 거절이라 제외 |
+| DB 커넥션 풀 | `db_pool_connections{state}`, `db_pool_waiting_requests`, `db_pool_max_connections` | active가 max에 붙고 waiting이 쌓이면 풀이 병목 |
+| 이벤트 루프 지연 / CPU | `nodejs_eventloop_lag_p99_seconds`, `process_cpu_seconds_total` | 앱 프로세스 자체가 포화인지 |
+
+모니터링 컨테이너도 같은 Docker VM 자원을 쓰므로, 수치 비교용 측정은 기존처럼 모니터링 없이 돌리고 병목 관찰용 실행과 구분한다.
+
 ## 실행 환경
 
 | 항목 | 값 |

@@ -6,6 +6,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { HealthController } from './health/health.controller.js';
+import { MetricsModule } from './metrics/metrics.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { StockModule } from './stock/stock.module.js';
 
@@ -14,6 +15,7 @@ import { StockModule } from './stock/stock.module.js';
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     StockModule,
+    MetricsModule,
     CacheModule.registerAsync({
       isGlobal: true,
       inject: [ConfigService],
