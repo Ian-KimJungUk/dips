@@ -12,4 +12,5 @@ datasource db {
 model Stock {
   id       Int @id @default(autoincrement())
   quantity Int
+  version  Int @default(0)
 }

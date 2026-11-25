@@ -1,5 +1,6 @@
 import {
   collectDefaultMetrics,
+  Counter,
   Gauge,
   Histogram,
   Registry,
@@ -18,6 +19,19 @@ export class MetricsService {
     help: 'HTTP 요청 처리 시간',
     labelNames: ['method', 'route', 'status_code'] as const,
     buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    registers: [this.registry],
+  });
+
+  // optimistic-lock 전략: version 충돌로 다시 시도한 횟수와 상한을 넘겨 503으로 끝난 횟수
+  readonly optimisticRetries = new Counter({
+    name: 'stock_optimistic_retries_total',
+    help: 'optimistic-lock 전략의 재시도 횟수 합',
+    registers: [this.registry],
+  });
+
+  readonly optimisticExhausted = new Counter({
+    name: 'stock_optimistic_exhausted_total',
+    help: 'optimistic-lock 전략에서 재시도 상한을 넘긴 횟수 합',
     registers: [this.registry],
   });
 

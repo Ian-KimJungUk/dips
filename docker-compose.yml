@@ -12,8 +12,10 @@ services:
       DATABASE_URL: postgres://dips:dips@postgres:5432/dips
       # 예: DATABASE_POOL_MAX=20 pnpm dev
       DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
-      # 재고 차감 전략 (naive | atomic-update | pessimistic-lock). 예: STOCK_STRATEGY=atomic-update pnpm dev
+      # 재고 차감 전략 (naive | atomic-update | pessimistic-lock | optimistic-lock). 예: STOCK_STRATEGY=atomic-update pnpm dev
       STOCK_STRATEGY: ${STOCK_STRATEGY:-naive}
+      # optimistic-lock의 재시도 상한 (첫 시도 제외). 넘기면 503
+      STOCK_OPTIMISTIC_MAX_RETRIES: ${STOCK_OPTIMISTIC_MAX_RETRIES:-10}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
