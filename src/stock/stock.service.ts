@@ -1,13 +1,16 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  STOCK_STRATEGY,
+  type StockStrategy,
+} from './strategies/stock-strategy.js';
 
 @Injectable()
 export class StockService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(STOCK_STRATEGY) private readonly strategy: StockStrategy,
+  ) {}
 
   async get(id: number) {
     const stock = await this.prisma.stock.findUnique({ where: { id } });
@@ -24,17 +27,8 @@ export class StockService {
     });
   }
 
-  // 락 없는 baseline: 조회 → JS에서 차감 → 저장.
-  // 조회와 저장 사이에 다른 요청이 끼어들면 같은 재고를 여러 번 팔게 된다(오버셀링).
-  // Prisma의 { decrement }는 원자적 UPDATE(quantity = quantity - n)라 경쟁 상태가 가려지므로 쓰지 않는다.
-  async decrease(id: number, quantity: number) {
-    const stock = await this.get(id);
-    if (stock.quantity < quantity) {
-      throw new ConflictException(`not enough stock: ${stock.quantity}`);
-    }
-    return this.prisma.stock.update({
-      where: { id },
-      data: { quantity: stock.quantity - quantity },
-    });
+  // 동시성 제어 방식은 STOCK_STRATEGY 환경변수로 고른 전략에 맡긴다 (stock.module.ts)
+  decrease(id: number, quantity: number) {
+    return this.strategy.decrease(id, quantity);
   }
 }

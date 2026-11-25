@@ -11,6 +11,28 @@
 - 판정: `sold > 100`이면 오버셀링 (threshold `sold: count<=100`)
 - 결과 JSON: `k6/results/<strategy>-<timestamp>.json`
 
+## 전략 전환
+
+엔드포인트는 그대로 두고, 앱 환경변수 `STOCK_STRATEGY`로 차감 전략을 고른다 (`src/stock/strategies/`, 기본값 `naive`).
+
+| 값 | 전략 |
+|---|---|
+| `naive` | 조회 → JS에서 차감 → 저장 (락 없음) |
+| `atomic-update` | `UPDATE ... SET quantity = quantity - n WHERE id = ? AND quantity >= n` 한 문장 |
+
+```bash
+STOCK_STRATEGY=atomic-update docker compose up -d --build --wait app
+STOCK_STRATEGY=atomic-update pnpm k6:stock
+```
+
+- 환경변수는 컨테이너를 **재생성**해야 반영된다. `docker compose restart`로는 바뀌지 않는다.
+- `--watch` 없이 띄우면 소스 동기화가 없으므로 `--build`로 현재 소스를 이미지에 넣는다.
+- k6의 결과 파일 이름표(`STRATEGY`)도 같은 `STOCK_STRATEGY` 값을 따른다. 앱과 k6에 같은 값을 줘야 이름표가 실제 전략과 맞는다.
+  - `docker compose run`은 의존 서비스(app)의 설정이 바뀌었으면 app을 재생성한다. 앱과 다른 값으로 k6를 돌리면 측정 직전에 앱이 재시작되어 워밍업이 무효가 된다.
+- 적용된 전략은 앱 시작 로그로 확인한다: `docker compose logs app | grep "stock strategy"`
+- 알 수 없는 값이면 앱이 시작되지 않는다.
+- Git Bash에서는 `/scripts/...` 경로가 Windows 경로로 바뀌므로 `MSYS_NO_PATHCONV=1`을 붙인다.
+
 ## 모니터링
 
 부하 테스트 중 병목을 보려면 Prometheus + Grafana를 함께 띄운다.
@@ -67,6 +89,7 @@ pnpm k6:stock
 2. **노트북 전원을 연결하고 다른 무거운 작업을 하지 않는다.** CPU 클럭이 바뀌면 같은 작업에도 CPU 시간이 달라진다.
 3. **전략마다 앱을 재시작하고, 워밍업 1회는 버린다.** 재시작 직후 첫 실행은 느리다 (규칙 전 naive 측정의 1회차 참고).
    - `docker compose restart app`, 헬스체크가 통과한 뒤 `pnpm k6:stock` 1회 (기록하지 않음)
+   - 전략을 바꿀 때는 restart 대신 [전략 전환](#전략-전환)의 재생성 명령을 쓴다.
 4. **5회 측정하고 중앙값을 대표값으로 쓴다.** 평균은 느린 회차 하나에 크게 끌려간다.
 5. **회차마다 앱 CPU 사용량을 함께 기록한다.** 느린 회차를 구분하는 근거다.
    - 실행 전후로 `curl -s localhost:3000/metrics | grep ^process_cpu_seconds_total`을 찍고 차이를 적는다.
@@ -190,6 +213,25 @@ pnpm k6:stock
   - 최종 재고만 보면 오버셀링을 놓친다. 판매 건수(`sold`)로 판정해야 한다.
 - p95 약 2.1초의 대부분은 커넥션 풀(10개) 대기 시간이다 (아래 관찰에서 메트릭으로 확인). 요청 1000건이 커넥션 10개를 기다리며 줄을 선다.
 - 워밍업을 제외해도 TPS가 296~456으로 회차 간 편차가 있다. 전략 간 차이가 이 범위 안이면 우열을 말하기 어렵다.
+
+## 결과: atomic-update (원자적 UPDATE)
+
+재고 확인과 차감을 UPDATE 한 문장으로 처리 (`src/stock/strategies/atomic-update.strategy.ts`)
+
+| 회차 | 결과 파일 | 판매(sold) | 거절(rejected) | 오버셀링 | TPS | p95 (ms) | 실패율 | 앱 CPU(초) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | | | | | | | | |
+| 2 | | | | | | | | |
+| 3 | | | | | | | | |
+| 4 | | | | | | | | |
+| 5 | | | | | | | | |
+| **중앙값** | | | | | | | | |
+
+- 측정일: , 커밋 ``, [측정 규칙](#측정-규칙) 적용
+
+### 해석
+
+- 거절 경로에서는 갱신된 행이 없을 때 404/409를 구분하려고 `SELECT`가 하나 더 나간다. 이 시나리오에서는 1000건 중 900건이 거절이므로, 쿼리 수는 판매 100건 × 1 + 거절 900건 × 2 = 1900개다 (naive는 1000건 × 2 = 2000개).
 
 ## 관찰: naive 실행 중 DB 커넥션 풀
 

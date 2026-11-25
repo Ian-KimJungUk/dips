@@ -1,22 +1,35 @@
 import { Agent } from 'node:http';
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, Type, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
+import { AtomicUpdateStrategy } from './../src/stock/strategies/atomic-update.strategy.js';
+import { NaiveStrategy } from './../src/stock/strategies/naive.strategy.js';
+import {
+  STOCK_STRATEGY,
+  type StockStrategy,
+} from './../src/stock/strategies/stock-strategy.js';
 
 const INITIAL = 100;
 const REQUESTS = Number(process.env.REQUESTS ?? 1000);
 
-describe('StockController (e2e)', () => {
+describe.each<{ strategy: Type<StockStrategy>; consistent: boolean }>([
+  // 락 없는 baseline: 오버셀링 여부는 타이밍에 따라 달라지므로 단언하지 않고 결과만 출력한다
+  { strategy: NaiveStrategy, consistent: false },
+  { strategy: AtomicUpdateStrategy, consistent: true },
+])('StockController (e2e) - $strategy.name', ({ strategy, consistent }) => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(STOCK_STRATEGY)
+      .useClass(strategy)
+      .compile();
 
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(
@@ -35,7 +48,6 @@ describe('StockController (e2e)', () => {
     await app.close();
   });
 
-  // 락 없는 baseline: 오버셀링 여부는 타이밍에 따라 달라지므로 단언하지 않고 결과만 출력한다
   it(`재고 ${INITIAL}개에 ${REQUESTS}건 동시 차감`, async () => {
     const { id } = await prisma.stock.create({ data: { quantity: INITIAL } });
     const url = await app.getUrl();
@@ -57,10 +69,14 @@ describe('StockController (e2e)', () => {
       where: { id },
     });
     console.log(
-      `[no-lock] 초기 재고 ${INITIAL} / 판매 ${sold} / 거절 ${rejected} / 최종 재고 ${quantity} / 오버셀링 ${sold - INITIAL}건`,
+      `[${app.get<StockStrategy>(STOCK_STRATEGY).name}] 초기 재고 ${INITIAL} / 판매 ${sold} / 거절 ${rejected} / 최종 재고 ${quantity} / 오버셀링 ${sold - INITIAL}건`,
     );
 
     expect(sold + rejected).toBe(REQUESTS);
+    if (consistent) {
+      expect(sold).toBe(Math.min(INITIAL, REQUESTS));
+      expect(quantity).toBe(Math.max(INITIAL - REQUESTS, 0));
+    }
     agent.destroy();
   });
 });
