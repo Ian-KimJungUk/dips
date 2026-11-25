@@ -19,6 +19,7 @@
 |---|---|
 | `naive` | 조회 → JS에서 차감 → 저장 (락 없음) |
 | `atomic-update` | `UPDATE ... SET quantity = quantity - n WHERE id = ? AND quantity >= n` 한 문장 |
+| `pessimistic-lock` | 트랜잭션 + `SELECT ... FOR UPDATE`로 행을 잠근 뒤 확인·차감 |
 
 ```bash
 STOCK_STRATEGY=atomic-update docker compose up -d --build --wait app

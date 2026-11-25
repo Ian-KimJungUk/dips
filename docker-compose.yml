@@ -12,7 +12,7 @@ services:
       DATABASE_URL: postgres://dips:dips@postgres:5432/dips
       # 예: DATABASE_POOL_MAX=20 pnpm dev
       DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
-      # 재고 차감 전략 (naive | atomic-update). 예: STOCK_STRATEGY=atomic-update pnpm dev
+      # 재고 차감 전략 (naive | atomic-update | pessimistic-lock). 예: STOCK_STRATEGY=atomic-update pnpm dev
       STOCK_STRATEGY: ${STOCK_STRATEGY:-naive}
       REDIS_URL: redis://redis:6379
     depends_on:
