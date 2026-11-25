@@ -368,3 +368,52 @@ pnpm k6:stock
 - 모니터링을 켜기만 한다고 느려지지는 않는다 (mon2는 모니터링을 켜고도 빨랐다).
 - 느린 두 회차 모두 모니터링이 켜져 있었다. mon3는 Prometheus·Grafana를 재시작한 직후였다. 모니터링을 끈 2회는 모두 빨랐지만 표본이 적어 관련 여부를 단정할 수 없다.
 - 다음 단계: 느린 회차를 재현해서 앱 CPU 프로파일(`node --cpu-prof`)을 떠 본다. 원인을 찾기 전까지 전략 비교용 수치 측정은 모니터링을 끄고 한다.
+
+## 관찰: naive vs atomic-update 대기 지점
+
+atomic-update가 naive보다 빠른 이유를 확인하려고, 모니터링을 켜고 두 전략을 1회씩 같은 절차로 돌려 앱 커넥션 풀과 DB 쪽 대기를 함께 봤다.
+
+- 측정일: 2026-11-25, 커밋 `26e6b3f` (`feat/atomic-update-strategy`)
+- 절차: 전략별로 앱 재생성 → 워밍업 1회 → 측정 1회. 모니터링을 켠 관찰용 실행이라 TPS는 [결과](#결과-atomic-update-원자적-update) 표와 비교하지 않는다.
+- DB 대기: 측정 중 100ms마다 `pg_stat_activity`에서 실행 중인(`state='active'`) 앱 커넥션을 대기 이벤트별로 셌다.
+  ```sql
+  select coalesce(wait_event_type,'CPU'), coalesce(wait_event,'-'), count(*)
+  from pg_stat_activity
+  where datname='dips' and backend_type='client backend' and state='active' and pid<>pg_backend_pid()
+  group by 1, 2
+  ```
+  - `psql`의 `\watch i=0.1 c=150`으로 돌렸다. postgres 컨테이너의 PID 1은 postmaster라서, `docker compose exec`로 띄운 프로세스를 시그널로 죽이면 postmaster가 크래시로 보고 서버 전체를 재시작한다. 그래서 샘플러가 정해진 횟수 뒤 스스로 끝나게 했다.
+- WAL: 측정 전후 `pg_stat_wal`의 차이. 샘플러 쿼리, setup/teardown 요청도 포함된다.
+
+| | naive | atomic-update |
+|---|---|---|
+| 결과 파일 | `naive-1795575713891.json` | `atomic-update-1795575754547.json` |
+| 판매 / 거절 | 1000 / 0 | 100 / 900 |
+| TPS / p95 (ms) | 362.0 / 2368.3 | 386.6 / 1922.8 |
+| 풀 `waiting` 최대 | 839 | 828 |
+| WAL 레코드 / 바이트 | 4039 / 213,473 | 299 / 16,123 |
+| DB 실행 중 커넥션이 보인 샘플 (150개 중) | 14 | 6 |
+| 그 샘플의 평균 실행 중 커넥션 | 7.8 | 2.8 |
+| └ 행 락 대기 (`Lock/transactionid`, `Lock/tuple`) | 5.9 | 1.8 |
+| └ WAL flush 대기 (`IO/WalSync`) | 0.5 | 0.5 |
+| 앱 CPU (초) | 3.0 | 3.1 |
+
+### naive
+
+![naive 관찰 대시보드](images/grafana-observe-naive.png)
+
+### atomic-update
+
+![atomic-update 관찰 대시보드](images/grafana-observe-atomic-update.png)
+
+- 두 스크린샷 모두 왼쪽 끝 1~2초는 직전 워밍업 실행의 꼬리다.
+
+### 해석
+
+- **쓰기 횟수가 차이를 만든다.** WAL 레코드가 4039 → 299로 약 13분의 1이다. naive는 lost update로 1000건이 모두 같은 행에 UPDATE를 하고, atomic-update는 판매 100건만 행을 바꾼다. 재고가 0이 된 뒤 들어온 UPDATE는 스냅샷에서 WHERE(`quantity >= 1`)가 맞지 않아 행 락을 기다리지 않고, 바뀐 행이 없으니 WAL도 남기지 않는다.
+- **naive의 DB 쪽 대기는 대부분 행 락이다.** DB에서 실행 중인 커넥션이 보일 때 평균 7.8개 중 5.9개가 다른 트랜잭션의 행 락을 기다리고 있었다. 락을 쥔 쪽은 커밋(WAL flush)까지 락을 놓지 않으므로, 같은 행에 대한 쓰기 1000번이 직렬로 줄을 선다.
+- **atomic-update의 행 락 대기는 판매 구간에만 있다.** 행 락 대기는 측정 초반 약 0.7초(판매 100건 구간)에만 보였고, 그 뒤 거절 900건 동안은 DB에서 실행 중인 커넥션이 거의 보이지 않았다.
+- **병목이 행 락으로 옮겨가지는 않았다.** 행 락 대기는 naive에서 더 컸고 atomic-update에서 줄었다. 반대로 풀 `waiting` 최댓값은 839 → 828로 거의 같다.
+  - 요청 1000건이 한꺼번에 도착하고 커넥션은 10개라, `waiting` 최댓값은 주로 도착 패턴이 정한다. 전략 차이는 최댓값보다 대기 시간(p95)에 나타난다.
+  - atomic-update의 거절 구간에서는 풀의 `active`가 10인데도 DB에서 실행 중인 커넥션은 거의 없었다. 커넥션을 잡고 있는 시간의 대부분이 DB 밖(네트워크 왕복, 앱의 요청·응답 처리)이라는 뜻이다. 남은 병목은 DB보다 앱 쪽으로 보인다. 앱 CPU는 1코어의 약 90%까지 올랐다.
+- 한계: 전략별 1회씩, 100ms 간격 샘플이다. 1ms 미만으로 끝나는 쿼리는 샘플에 잘 잡히지 않으므로, 샘플 수 자체보다 대기 이벤트의 비율을 본다.
