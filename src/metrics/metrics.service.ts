@@ -35,6 +35,13 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // redis-lua 전략: 플러셔가 Redis 현재값을 DB에 덮어쓴 UPDATE 횟수
+  readonly stockRedisFlushWrites = new Counter({
+    name: 'stock_redis_flush_writes_total',
+    help: 'redis-lua 전략의 플러시로 DB에 쓴 UPDATE 횟수 합',
+    registers: [this.registry],
+  });
+
   constructor(prisma: PrismaService) {
     collectDefaultMetrics({ register: this.registry });
 

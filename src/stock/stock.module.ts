@@ -7,13 +7,14 @@ import { AtomicUpdateStrategy } from './strategies/atomic-update.strategy.js';
 import { NaiveStrategy } from './strategies/naive.strategy.js';
 import { OptimisticLockStrategy } from './strategies/optimistic-lock.strategy.js';
 import { PessimisticLockStrategy } from './strategies/pessimistic-lock.strategy.js';
+import { RedisLuaStrategy } from './strategies/redis-lua.strategy.js';
 import {
   STOCK_STRATEGY,
   type StockStrategy,
 } from './strategies/stock-strategy.js';
 
 @Module({
-  // OptimisticLockStrategy가 재시도·소진 카운터를 올린다
+  // OptimisticLockStrategy가 재시도·소진 카운터를, RedisLuaStrategy가 플러시 카운터를 올린다
   imports: [MetricsModule],
   controllers: [StockController],
   providers: [
@@ -22,6 +23,7 @@ import {
     AtomicUpdateStrategy,
     PessimisticLockStrategy,
     OptimisticLockStrategy,
+    RedisLuaStrategy,
     {
       provide: STOCK_STRATEGY,
       inject: [
@@ -30,6 +32,7 @@ import {
         AtomicUpdateStrategy,
         PessimisticLockStrategy,
         OptimisticLockStrategy,
+        RedisLuaStrategy,
       ],
       useFactory: (config: ConfigService, ...strategies: StockStrategy[]) => {
         const name = config.get<string>('STOCK_STRATEGY') ?? 'naive';

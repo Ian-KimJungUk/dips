@@ -41,6 +41,7 @@
 | `atomic-update` | `UPDATE ... SET quantity = quantity - n WHERE id = ? AND quantity >= n` 한 문장 |
 | `pessimistic-lock` | 트랜잭션 + `SELECT ... FOR UPDATE`로 행을 잠근 뒤 확인·차감 |
 | `optimistic-lock` | version 컬럼 비교 후 갱신, 충돌 시 즉시 재시도, 상한 초과 시 503 |
+| `redis-lua` | Lua로 재고 확인·차감을 원자적으로 처리하고, DB에는 인터벌마다 현재값을 덮어써 비동기 반영 |
 
 ```bash
 STOCK_STRATEGY=atomic-update docker compose up -d --build --wait app
@@ -54,6 +55,8 @@ STOCK_STRATEGY=atomic-update pnpm k6:stock
 - 적용된 전략은 앱 시작 로그로 확인한다: `docker compose logs app | grep "stock strategy"`
 - 알 수 없는 값이면 앱이 시작되지 않는다.
 - `optimistic-lock`의 재시도 상한은 `STOCK_OPTIMISTIC_MAX_RETRIES`(기본 10, 첫 시도 제외)로 정한다. 0 이상의 정수가 아니면 앱이 시작되지 않고, 적용값은 시작 로그(`optimistic lock max retries`)로 확인한다. 모든 전략이 시작 시 생성되므로 다른 전략을 선택해도 이 검증과 로그는 실행된다.
+- `redis-lua`가 Redis 현재값을 DB에 덮어쓰는 주기는 `STOCK_REDIS_FLUSH_INTERVAL_MS`(기본 100ms)로 정한다. 양의 정수가 아니면 앱이 시작되지 않으며, 위와 같은 이유로 다른 전략을 선택해도 이 검증은 실행된다.
+  - 한계: Redis 데이터가 유실되고 DB가 뒤처진 상태면 오버셀링이 가능하다. 플러셔는 앱 인스턴스 하나를 가정한다.
 - Git Bash에서는 `/scripts/...` 경로가 Windows 경로로 바뀌므로 `MSYS_NO_PATHCONV=1`을 붙인다.
 
 ## 모니터링
