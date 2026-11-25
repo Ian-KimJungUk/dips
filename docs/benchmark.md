@@ -47,7 +47,7 @@ STOCK_STRATEGY=atomic-update pnpm k6:stock
   - `docker compose run`은 의존 서비스(app)의 설정이 바뀌었으면 app을 재생성한다. 앱과 다른 값으로 k6를 돌리면 측정 직전에 앱이 재시작되어 워밍업이 무효가 된다.
 - 적용된 전략은 앱 시작 로그로 확인한다: `docker compose logs app | grep "stock strategy"`
 - 알 수 없는 값이면 앱이 시작되지 않는다.
-- `optimistic-lock`의 재시도 상한은 `STOCK_OPTIMISTIC_MAX_RETRIES`(기본 10, 첫 시도 제외)로 정한다. 0 이상의 정수가 아니면 앱이 시작되지 않고, 적용값은 시작 로그(`optimistic lock max retries`)로 확인한다.
+- `optimistic-lock`의 재시도 상한은 `STOCK_OPTIMISTIC_MAX_RETRIES`(기본 10, 첫 시도 제외)로 정한다. 0 이상의 정수가 아니면 앱이 시작되지 않고, 적용값은 시작 로그(`optimistic lock max retries`)로 확인한다. 모든 전략이 시작 시 생성되므로 다른 전략을 선택해도 이 검증과 로그는 실행된다.
 - Git Bash에서는 `/scripts/...` 경로가 Windows 경로로 바뀌므로 `MSYS_NO_PATHCONV=1`을 붙인다.
 
 ## 모니터링
