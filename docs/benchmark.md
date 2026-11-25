@@ -11,6 +11,28 @@
 - 판정: `sold > 100`이면 오버셀링 (threshold `sold: count<=100`)
 - 결과 JSON: `k6/results/<strategy>-<timestamp>.json`
 
+## 전략 전환
+
+엔드포인트는 그대로 두고, 앱 환경변수 `STOCK_STRATEGY`로 차감 전략을 고른다 (`src/stock/strategies/`, 기본값 `naive`).
+
+| 값 | 전략 |
+|---|---|
+| `naive` | 조회 → JS에서 차감 → 저장 (락 없음) |
+| `atomic-update` | `UPDATE ... SET quantity = quantity - n WHERE id = ? AND quantity >= n` 한 문장 |
+
+```bash
+STOCK_STRATEGY=atomic-update docker compose up -d --build --wait app
+STOCK_STRATEGY=atomic-update pnpm k6:stock
+```
+
+- 환경변수는 컨테이너를 **재생성**해야 반영된다. `docker compose restart`로는 바뀌지 않는다.
+- `--watch` 없이 띄우면 소스 동기화가 없으므로 `--build`로 현재 소스를 이미지에 넣는다.
+- k6의 결과 파일 이름표(`STRATEGY`)도 같은 `STOCK_STRATEGY` 값을 따른다. 앱과 k6에 같은 값을 줘야 이름표가 실제 전략과 맞는다.
+  - `docker compose run`은 의존 서비스(app)의 설정이 바뀌었으면 app을 재생성한다. 앱과 다른 값으로 k6를 돌리면 측정 직전에 앱이 재시작되어 워밍업이 무효가 된다.
+- 적용된 전략은 앱 시작 로그로 확인한다: `docker compose logs app | grep "stock strategy"`
+- 알 수 없는 값이면 앱이 시작되지 않는다.
+- Git Bash에서는 `/scripts/...` 경로가 Windows 경로로 바뀌므로 `MSYS_NO_PATHCONV=1`을 붙인다.
+
 ## 모니터링
 
 부하 테스트 중 병목을 보려면 Prometheus + Grafana를 함께 띄운다.
@@ -67,6 +89,7 @@ pnpm k6:stock
 2. **노트북 전원을 연결하고 다른 무거운 작업을 하지 않는다.** CPU 클럭이 바뀌면 같은 작업에도 CPU 시간이 달라진다.
 3. **전략마다 앱을 재시작하고, 워밍업 1회는 버린다.** 재시작 직후 첫 실행은 느리다 (규칙 전 naive 측정의 1회차 참고).
    - `docker compose restart app`, 헬스체크가 통과한 뒤 `pnpm k6:stock` 1회 (기록하지 않음)
+   - 전략을 바꿀 때는 restart 대신 [전략 전환](#전략-전환)의 재생성 명령을 쓴다.
 4. **5회 측정하고 중앙값을 대표값으로 쓴다.** 평균은 느린 회차 하나에 크게 끌려간다.
 5. **회차마다 앱 CPU 사용량을 함께 기록한다.** 느린 회차를 구분하는 근거다.
    - 실행 전후로 `curl -s localhost:3000/metrics | grep ^process_cpu_seconds_total`을 찍고 차이를 적는다.
@@ -191,6 +214,113 @@ pnpm k6:stock
 - p95 약 2.1초의 대부분은 커넥션 풀(10개) 대기 시간이다 (아래 관찰에서 메트릭으로 확인). 요청 1000건이 커넥션 10개를 기다리며 줄을 선다.
 - 워밍업을 제외해도 TPS가 296~456으로 회차 간 편차가 있다. 전략 간 차이가 이 범위 안이면 우열을 말하기 어렵다.
 
+## 결과: atomic-update (원자적 UPDATE)
+
+재고 확인과 차감을 UPDATE 한 문장으로 처리 (`src/stock/strategies/atomic-update.strategy.ts`)
+
+| 회차 | 결과 파일 | 판매(sold) | 거절(rejected) | 오버셀링 | TPS | p95 (ms) | 실패율 | 앱 CPU(초) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `atomic-update-1795574016348.json` | 100 | 900 | 0 | 601.4 | 1383.0 | 0 | 2.0 |
+| 2 | `atomic-update-1795574020985.json` | 100 | 900 | 0 | 544.8 | 1422.8 | 0 | 2.1 |
+| 3 | `atomic-update-1795574025692.json` | 100 | 900 | 0 | 562.7 | 1505.5 | 0 | 1.9 |
+| 4 | `atomic-update-1795574030662.json` | 100 | 900 | 0 | 516.2 | 1668.5 | 0 | 2.2 |
+| 5 | `atomic-update-1795574035053.json` | 100 | 900 | 0 | 572.6 | 1473.3 | 0 | 1.9 |
+| **중앙값** | | **100** | **900** | **0** | **562.7** | **1473.3** | **0** | **2.0** |
+
+- 측정일: 2026-11-25, 커밋 `5a5d75b` (`feat/atomic-update-strategy`), [측정 규칙](#측정-규칙) 적용 (모니터링 끔, AC 전원, 앱 재시작 후 워밍업 1회 제외)
+- 이상치(TPS < 281.4, 중앙값의 절반) 없음. 앱 CPU 1.9~2.2초.
+
+<details>
+<summary>원본 JSON</summary>
+
+`atomic-update-1795574016348.json`
+```json
+{
+  "strategy": "atomic-update",
+  "initial": 100,
+  "requests": 1000,
+  "sold": 100,
+  "rejected": 900,
+  "oversold": 0,
+  "tps": 601.4350940015981,
+  "p95_ms": 1382.97381295,
+  "failed_rate": 0
+}
+```
+
+`atomic-update-1795574020985.json`
+```json
+{
+  "strategy": "atomic-update",
+  "initial": 100,
+  "requests": 1000,
+  "sold": 100,
+  "rejected": 900,
+  "oversold": 0,
+  "tps": 544.8426092002729,
+  "p95_ms": 1422.8311306999997,
+  "failed_rate": 0
+}
+```
+
+`atomic-update-1795574025692.json`
+```json
+{
+  "strategy": "atomic-update",
+  "initial": 100,
+  "requests": 1000,
+  "sold": 100,
+  "rejected": 900,
+  "oversold": 0,
+  "tps": 562.7052991956134,
+  "p95_ms": 1505.4896237,
+  "failed_rate": 0
+}
+```
+
+`atomic-update-1795574030662.json`
+```json
+{
+  "strategy": "atomic-update",
+  "initial": 100,
+  "requests": 1000,
+  "sold": 100,
+  "rejected": 900,
+  "oversold": 0,
+  "tps": 516.1932836480435,
+  "p95_ms": 1668.5175511,
+  "failed_rate": 0
+}
+```
+
+`atomic-update-1795574035053.json`
+```json
+{
+  "strategy": "atomic-update",
+  "initial": 100,
+  "requests": 1000,
+  "sold": 100,
+  "rejected": 900,
+  "oversold": 0,
+  "tps": 572.5918148032075,
+  "p95_ms": 1473.28274205,
+  "failed_rate": 0
+}
+```
+
+</details>
+
+### 해석
+
+- 5회 모두 정확히 100건 판매, 900건 거절(409), 최종 재고 0으로 **오버셀링이 없다.**
+- naive 대비 (중앙값): TPS 395.5 → 562.7 (약 1.4배), p95 2127.4 → 1473.3ms (약 31% 감소), 앱 CPU 2.6 → 2.0초.
+  - TPS 범위가 naive 296~456, atomic-update 516~601로 겹치지 않으므로 회차 간 편차보다 큰 차이다.
+  - 다만 두 전략은 따로 측정했고 커밋도 다르다(`5c24047` / `5a5d75b`).
+- 거절 경로에서는 갱신된 행이 없을 때 404/409를 구분하려고 `SELECT`가 하나 더 나간다. 이 시나리오에서는 1000건 중 900건이 거절이므로, 쿼리 수는 판매 100건 × 1 + 거절 900건 × 2 = 1900개다 (naive는 1000건 × 2 = 2000개).
+- 쿼리 수는 거의 같으므로 쿼리 수로는 속도 차이가 설명되지 않는다. 차이는 **같은 행에 대한 쓰기 횟수**다 ([관찰](#관찰-naive-vs-atomic-update-대기-지점)에서 확인).
+  - naive는 lost update로 1000건이 모두 같은 행을 UPDATE하고, 각 UPDATE는 커밋(WAL flush)까지 행 락을 쥔다. 관찰 실행에서 DB에서 실행 중인 커넥션의 대부분(7.8개 중 5.9개)이 이 행 락을 기다리고 있었다.
+  - atomic-update는 판매 100건만 행을 바꾼다 (WAL 레코드 4039 → 299). 재고가 0이 된 뒤의 UPDATE는 조건에 맞는 행이 없어 락 대기 없이 끝나고, 뒤따르는 `SELECT`는 읽기라 가볍다.
+
 ## 관찰: naive 실행 중 DB 커넥션 풀
 
 모니터링을 켠 상태로 naive 시나리오를 다시 돌려 커넥션 풀 상태를 확인했다.
@@ -240,3 +370,52 @@ pnpm k6:stock
 - 모니터링을 켜기만 한다고 느려지지는 않는다 (mon2는 모니터링을 켜고도 빨랐다).
 - 느린 두 회차 모두 모니터링이 켜져 있었다. mon3는 Prometheus·Grafana를 재시작한 직후였다. 모니터링을 끈 2회는 모두 빨랐지만 표본이 적어 관련 여부를 단정할 수 없다.
 - 다음 단계: 느린 회차를 재현해서 앱 CPU 프로파일(`node --cpu-prof`)을 떠 본다. 원인을 찾기 전까지 전략 비교용 수치 측정은 모니터링을 끄고 한다.
+
+## 관찰: naive vs atomic-update 대기 지점
+
+atomic-update가 naive보다 빠른 이유를 확인하려고, 모니터링을 켜고 두 전략을 1회씩 같은 절차로 돌려 앱 커넥션 풀과 DB 쪽 대기를 함께 봤다.
+
+- 측정일: 2026-11-25, 커밋 `26e6b3f` (`feat/atomic-update-strategy`)
+- 절차: 전략별로 앱 재생성 → 워밍업 1회 → 측정 1회. 모니터링을 켠 관찰용 실행이라 TPS는 [결과](#결과-atomic-update-원자적-update) 표와 비교하지 않는다.
+- DB 대기: 측정 중 100ms마다 `pg_stat_activity`에서 실행 중인(`state='active'`) 앱 커넥션을 대기 이벤트별로 셌다.
+  ```sql
+  select coalesce(wait_event_type,'CPU'), coalesce(wait_event,'-'), count(*)
+  from pg_stat_activity
+  where datname='dips' and backend_type='client backend' and state='active' and pid<>pg_backend_pid()
+  group by 1, 2
+  ```
+  - `psql`의 `\watch i=0.1 c=150`으로 돌렸다. postgres 컨테이너의 PID 1은 postmaster라서, `docker compose exec`로 띄운 프로세스를 시그널로 죽이면 postmaster가 크래시로 보고 서버 전체를 재시작한다. 그래서 샘플러가 정해진 횟수 뒤 스스로 끝나게 했다.
+- WAL: 측정 전후 `pg_stat_wal`의 차이. 샘플러 쿼리, setup/teardown 요청도 포함된다.
+
+| | naive | atomic-update |
+|---|---|---|
+| 결과 파일 | `naive-1795575713891.json` | `atomic-update-1795575754547.json` |
+| 판매 / 거절 | 1000 / 0 | 100 / 900 |
+| TPS / p95 (ms) | 362.0 / 2368.3 | 386.6 / 1922.8 |
+| 풀 `waiting` 최대 | 839 | 828 |
+| WAL 레코드 / 바이트 | 4039 / 213,473 | 299 / 16,123 |
+| DB 실행 중 커넥션이 보인 샘플 (150개 중) | 14 | 6 |
+| 그 샘플의 평균 실행 중 커넥션 | 7.8 | 2.8 |
+| └ 행 락 대기 (`Lock/transactionid`, `Lock/tuple`) | 5.9 | 1.8 |
+| └ WAL flush 대기 (`IO/WalSync`) | 0.5 | 0.5 |
+| 앱 CPU (초) | 3.0 | 3.1 |
+
+### naive
+
+![naive 관찰 대시보드](images/grafana-observe-naive.png)
+
+### atomic-update
+
+![atomic-update 관찰 대시보드](images/grafana-observe-atomic-update.png)
+
+- 두 스크린샷 모두 왼쪽 끝 1~2초는 직전 워밍업 실행의 꼬리다.
+
+### 해석
+
+- **쓰기 횟수가 차이를 만든다.** WAL 레코드가 4039 → 299로 약 13분의 1이다. naive는 lost update로 1000건이 모두 같은 행에 UPDATE를 하고, atomic-update는 판매 100건만 행을 바꾼다. 재고가 0이 된 뒤 들어온 UPDATE는 스냅샷에서 WHERE(`quantity >= 1`)가 맞지 않아 행 락을 기다리지 않고, 바뀐 행이 없으니 WAL도 남기지 않는다.
+- **naive의 DB 쪽 대기는 대부분 행 락이다.** DB에서 실행 중인 커넥션이 보일 때 평균 7.8개 중 5.9개가 다른 트랜잭션의 행 락을 기다리고 있었다. 락을 쥔 쪽은 커밋(WAL flush)까지 락을 놓지 않으므로, 같은 행에 대한 쓰기 1000번이 직렬로 줄을 선다.
+- **atomic-update의 행 락 대기는 판매 구간에만 있다.** 행 락 대기는 측정 초반 약 0.7초(판매 100건 구간)에만 보였고, 그 뒤 거절 900건 동안은 DB에서 실행 중인 커넥션이 거의 보이지 않았다.
+- **병목이 행 락으로 옮겨가지는 않았다.** 행 락 대기는 naive에서 더 컸고 atomic-update에서 줄었다. 반대로 풀 `waiting` 최댓값은 839 → 828로 거의 같다.
+  - 요청 1000건이 한꺼번에 도착하고 커넥션은 10개라, `waiting` 최댓값은 주로 도착 패턴이 정한다. 전략 차이는 최댓값보다 대기 시간(p95)에 나타난다.
+  - atomic-update의 거절 구간에서는 풀의 `active`가 10인데도 DB에서 실행 중인 커넥션은 거의 없었다. 커넥션을 잡고 있는 시간의 대부분이 DB 밖(네트워크 왕복, 앱의 요청·응답 처리)이라는 뜻이다. 남은 병목은 DB보다 앱 쪽으로 보인다. 앱 CPU는 1코어의 약 90%까지 올랐다.
+- 한계: 전략별 1회씩, 100ms 간격 샘플이다. 1ms 미만으로 끝나는 쿼리는 샘플에 잘 잡히지 않으므로, 샘플 수 자체보다 대기 이벤트의 비율을 본다.

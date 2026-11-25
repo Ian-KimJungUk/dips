@@ -12,6 +12,8 @@ services:
       DATABASE_URL: postgres://dips:dips@postgres:5432/dips
       # 예: DATABASE_POOL_MAX=20 pnpm dev
       DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      # 재고 차감 전략 (naive | atomic-update). 예: STOCK_STRATEGY=atomic-update pnpm dev
+      STOCK_STRATEGY: ${STOCK_STRATEGY:-naive}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
@@ -67,6 +69,9 @@ services:
   k6:
     image: grafana/k6:1.3.0
     profiles: ['k6']
+    environment:
+      # 결과 파일 이름표. 앱과 같은 셸 변수를 써서 실제 전략과 어긋나지 않게 한다
+      STRATEGY: ${STOCK_STRATEGY:-naive}
     volumes:
       - ./k6:/scripts
       - ./k6/results:/results
