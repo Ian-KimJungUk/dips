@@ -4,6 +4,7 @@ import { StockController } from './stock.controller.js';
 import { StockService } from './stock.service.js';
 import { AtomicUpdateStrategy } from './strategies/atomic-update.strategy.js';
 import { NaiveStrategy } from './strategies/naive.strategy.js';
+import { PessimisticLockStrategy } from './strategies/pessimistic-lock.strategy.js';
 import {
   STOCK_STRATEGY,
   type StockStrategy,
@@ -15,9 +16,15 @@ import {
     StockService,
     NaiveStrategy,
     AtomicUpdateStrategy,
+    PessimisticLockStrategy,
     {
       provide: STOCK_STRATEGY,
-      inject: [ConfigService, NaiveStrategy, AtomicUpdateStrategy],
+      inject: [
+        ConfigService,
+        NaiveStrategy,
+        AtomicUpdateStrategy,
+        PessimisticLockStrategy,
+      ],
       useFactory: (config: ConfigService, ...strategies: StockStrategy[]) => {
         const name = config.get<string>('STOCK_STRATEGY') ?? 'naive';
         const strategy = strategies.find((s) => s.name === name);

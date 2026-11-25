@@ -7,6 +7,7 @@ import { AppModule } from './../src/app.module.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
 import { AtomicUpdateStrategy } from './../src/stock/strategies/atomic-update.strategy.js';
 import { NaiveStrategy } from './../src/stock/strategies/naive.strategy.js';
+import { PessimisticLockStrategy } from './../src/stock/strategies/pessimistic-lock.strategy.js';
 import {
   STOCK_STRATEGY,
   type StockStrategy,
@@ -19,6 +20,7 @@ describe.each<{ strategy: Type<StockStrategy>; consistent: boolean }>([
   // 락 없는 baseline: 오버셀링 여부는 타이밍에 따라 달라지므로 단언하지 않고 결과만 출력한다
   { strategy: NaiveStrategy, consistent: false },
   { strategy: AtomicUpdateStrategy, consistent: true },
+  { strategy: PessimisticLockStrategy, consistent: true },
 ])('StockController (e2e) - $strategy.name', ({ strategy, consistent }) => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
@@ -78,5 +80,14 @@ describe.each<{ strategy: Type<StockStrategy>; consistent: boolean }>([
       expect(quantity).toBe(Math.max(INITIAL - REQUESTS, 0));
     }
     agent.destroy();
+  });
+
+  it('없는 재고를 차감하면 404', async () => {
+    // Int 최대값이라 시퀀스로 만들어진 id와 겹치지 않는다
+    const res = await request(app.getHttpServer())
+      .post('/stocks/2147483647/decrease')
+      .send({ quantity: 1 });
+
+    expect(res.status).toBe(404);
   });
 });
