@@ -92,9 +92,11 @@ export class RedisLuaStrategy implements StockStrategy, OnModuleDestroy {
     throw new ServiceUnavailableException('stock cache unavailable');
   }
 
-  // 재고 재설정 시 낡은 Redis 값이 남아 이후 차감이 옛 값 기준으로 동작하지 않게 덮어쓴다
+  // 재고 재설정 시 낡은 Redis 값이 남아 이후 차감이 옛 값 기준으로 동작하지 않게 덮어쓴다.
+  // 진행 중인 플러시가 재설정 전 값을 DB에 덮어쓸 수 있으므로 dirty로 표시해 다음 틱에 다시 맞춘다
   async reset(id: number, quantity: number) {
     await this.cache(() => this.redis.set(key(id), quantity));
+    this.markDirty(id);
   }
 
   // DB는 플러시 전까지 뒤처지므로 조회는 Redis 값을 기준으로 한다

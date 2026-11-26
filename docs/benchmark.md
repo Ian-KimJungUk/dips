@@ -57,6 +57,8 @@ STOCK_STRATEGY=atomic-update pnpm k6:stock
 - `optimistic-lock`의 재시도 상한은 `STOCK_OPTIMISTIC_MAX_RETRIES`(기본 10, 첫 시도 제외)로 정한다. 0 이상의 정수가 아니면 앱이 시작되지 않고, 적용값은 시작 로그(`optimistic lock max retries`)로 확인한다. 모든 전략이 시작 시 생성되므로 다른 전략을 선택해도 이 검증과 로그는 실행된다.
 - `redis-lua`가 Redis 현재값을 DB에 덮어쓰는 주기는 `STOCK_REDIS_FLUSH_INTERVAL_MS`(기본 100ms)로 정한다. 양의 정수가 아니면 앱이 시작되지 않으며, 위와 같은 이유로 다른 전략을 선택해도 이 검증은 실행된다.
   - 한계: Redis 데이터가 유실되고 DB가 뒤처진 상태면 오버셀링이 가능하다. 플러셔는 앱 인스턴스 하나를 가정한다.
+  - 한계: 반영 대기 중인 id(dirty)는 앱 메모리에만 있다. 종료 시 마지막 반영을 하지만, 비정상 종료로 남은 id가 사라지면 그 재고는 다음 차감 전까지 DB가 뒤처진다(응답은 Redis 기준이라 맞다). 시작 시 `stock:*` 키를 스캔해 맞추는 보정은 개선 과제로 남긴다.
+  - 측정 조건: Redis 키가 없으면 첫 요청들이 DB에서 재고를 읽어 올린다(동시 요청이 몰리면 전부 DB를 조회). k6 `setup`의 `PUT`이 키를 미리 올리므로 측정은 키가 올라간 상태에서 시작한다.
 - Git Bash에서는 `/scripts/...` 경로가 Windows 경로로 바뀌므로 `MSYS_NO_PATHCONV=1`을 붙인다.
 
 ## 모니터링
