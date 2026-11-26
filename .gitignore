@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.env
+*.log
+*.tsbuildinfo
+src/generated/
+k6/results/*
+!k6/results/.gitkeep

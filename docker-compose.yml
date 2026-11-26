@@ -1,0 +1,79 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    # PID 1인 pnpm이 좀비 프로세스를 회수하지 않아 컨테이너가 멈추지 않는 문제 방지
+    init: true
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://dips:dips@postgres:5432/dips
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # start:dev는 컴파일 후에 listen하므로 컨테이너 시작과 요청 수신 가능 시점이 다르다
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/health || exit 1']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    develop:
+      watch:
+        - action: sync
+          path: ./src
+          target: /app/src
+        - action: rebuild
+          path: package.json
+        - action: rebuild
+          path: pnpm-lock.yaml
+        - action: rebuild
+          path: prisma/schema.prisma
+
+  postgres:
+    image: postgres:18-alpine
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: dips
+      POSTGRES_PASSWORD: dips
+      POSTGRES_DB: dips
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dips -d dips']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  k6:
+    image: grafana/k6:1.3.0
+    profiles: ['k6']
+    environment:
+      BASE_URL: http://app:3000
+    volumes:
+      - ./k6:/scripts
+      - ./k6/results:/results
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:

@@ -1,0 +1,15 @@
+FROM node:26-alpine
+
+WORKDIR /app
+
+RUN npm install -g pnpm@10.34.9
+
+COPY package.json pnpm-lock.yaml prisma.config.ts ./
+COPY prisma ./prisma
+# prisma generate(postinstall)는 DB에 접속하지 않지만 prisma.config.ts가 DATABASE_URL을 요구함
+RUN DATABASE_URL=postgres://placeholder pnpm install --frozen-lockfile
+
+COPY . .
+
+EXPOSE 3000
+CMD ["pnpm", "start:dev"]
